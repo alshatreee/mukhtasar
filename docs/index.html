@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>mukhtasar — Arabic Text Summarizer</title>
+<meta name="description" content="Summarize Arabic text. Extractive, offline, dialect-aware. No API. No model. 7-feature scoring with TextRank + TF-IDF.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,700&family=Space+Mono:wght@400;700&family=Noto+Kufi+Arabic:wght@400;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#07080c;--glass:rgba(255,255,255,.03);--glass-border:rgba(255,255,255,.08);--glass-border-h:rgba(255,255,255,.15);
+  --fg:#e2e8f0;--fg2:#94a3b8;--fg3:#475569;
+  --green:#22c55e;--teal:#14b8a6;--cyan:#06b6d4;--emerald:#10b981;--amber:#f59e0b;--red:#ef4444;
+  --font:'DM Sans',system-ui,sans-serif;--mono:'Space Mono',monospace;
+  --max:1000px;--radius:14px;
+}
+html{scroll-behavior:smooth;background:var(--bg)}
+body{font-family:var(--font);color:var(--fg);background:var(--bg);line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+a{color:var(--teal);text-decoration:none}a:hover{text-decoration:underline}
+::selection{background:var(--teal);color:#fff}
+code{font-family:var(--mono);font-size:.85em;background:rgba(255,255,255,.06);padding:.15em .4em;border-radius:4px}
+
+.bg-mesh{position:fixed;inset:0;z-index:-2;overflow:hidden}
+.bg-mesh .orb{position:absolute;border-radius:50%;filter:blur(130px);opacity:.1;will-change:transform}
+.orb-1{width:600px;height:600px;background:var(--green);top:-15%;left:10%;animation:d1 22s ease-in-out infinite}
+.orb-2{width:500px;height:500px;background:var(--teal);bottom:0;right:-10%;animation:d2 26s ease-in-out infinite}
+.orb-3{width:400px;height:400px;background:var(--cyan);top:50%;left:-10%;animation:d1 18s ease-in-out infinite reverse}
+@keyframes d1{0%,100%{transform:translate(0,0)}50%{transform:translate(60px,30px)}}
+@keyframes d2{0%,100%{transform:translate(0,0)}50%{transform:translate(-50px,50px)}}
+
+.bg-grid{position:fixed;inset:0;z-index:-1;background-image:radial-gradient(rgba(255,255,255,.03) 1px,transparent 1px);background-size:30px 30px;mask-image:radial-gradient(ellipse 60% 60% at 50% 50%,black,transparent)}
+
+.glass{background:var(--glass);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid var(--glass-border);border-radius:var(--radius);transition:border-color .3s,box-shadow .3s}
+.glass:hover{border-color:var(--glass-border-h)}
+
+nav{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:100;width:min(calc(100% - 2rem),var(--max));padding:.55rem 1.1rem;display:flex;justify-content:space-between;align-items:center}
+nav .logo{font-family:var(--mono);font-weight:700;font-size:.9rem;color:#fff}
+nav .logo .v{font-size:.65rem;color:var(--fg3);font-weight:400;margin-left:.2rem}
+.nav-links{display:flex;gap:1rem;align-items:center;font-size:.78rem}
+.nav-links a{color:var(--fg2)}
+.nav-links a:hover{color:#fff;text-decoration:none}
+.gh-pill{display:inline-flex;align-items:center;gap:.3rem;padding:.25rem .6rem;border:1px solid var(--glass-border);border-radius:20px;font-size:.72rem;color:var(--fg);font-family:var(--mono);transition:all .2s}
+.gh-pill:hover{border-color:var(--teal);color:var(--teal);text-decoration:none}
+.gh-pill svg{width:13px;height:13px;fill:currentColor}
+
+.hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:7rem 1.5rem 5rem}
+.hero-badge{display:inline-flex;align-items:center;gap:.4rem;padding:.3rem .8rem;border-radius:20px;font-size:.65rem;font-weight:500;color:var(--green);letter-spacing:.04em;margin-bottom:1.5rem}
+.hero-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--green);animation:blink 1.5s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+h1{font-size:clamp(3.5rem,11vw,7rem);font-weight:700;line-height:.9;letter-spacing:-.05em;color:#fff}
+h1 .ar{font-family:'Noto Kufi Arabic',system-ui,sans-serif;font-size:.45em;color:var(--teal);display:block;margin-top:.3rem;letter-spacing:0}
+.hero-sub{font-size:clamp(.88rem,2vw,1.05rem);color:var(--fg2);max-width:520px;margin:1.5rem auto 0;font-weight:300;line-height:1.7;padding:0 .5rem}
+.hero-sub strong{color:#fff;font-weight:500}
+
+.stat-pill{display:inline-flex;align-items:center;gap:.8rem;margin:2rem 0;padding:.8rem 1.8rem;position:relative;overflow:hidden}
+.stat-pill::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(34,197,94,.12),rgba(20,184,166,.08));z-index:0}
+.stat-pill .stat{font-family:var(--mono);font-size:.78rem;color:var(--green);z-index:1;position:relative}
+.stat-pill .sep{color:var(--fg3);z-index:1;position:relative}
+
+.install-wrap{margin-top:1.5rem;display:flex;align-items:center;gap:.5rem;padding:.2rem .2rem .2rem .9rem;max-width:440px;font-family:var(--mono);font-size:.8rem}
+.install-wrap .pr{color:var(--fg3);user-select:none}
+.install-wrap code{flex:1;color:var(--green);background:none;padding:0}
+.install-btn{background:var(--green);color:#000;border:none;padding:.55rem 1rem;border-radius:calc(var(--radius) - 4px);cursor:pointer;font-family:var(--mono);font-size:.72rem;font-weight:700;transition:all .2s;white-space:nowrap}
+.install-btn:hover{filter:brightness(1.15)}
+.install-btn.copied{background:var(--teal)}
+
+.section{max-width:var(--max);margin:0 auto;padding:5rem 1.5rem}
+.s-label{font-family:var(--mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.2em;color:var(--green);margin-bottom:.6rem}
+.s-title{font-size:clamp(1.5rem,3.5vw,2rem);font-weight:700;color:#fff;letter-spacing:-.03em;margin-bottom:.4rem}
+.s-desc{color:var(--fg2);max-width:520px;font-size:.85rem;margin-bottom:2rem;font-weight:300;word-wrap:break-word}
+
+/* PROBLEM */
+.problem-box{padding:2rem;position:relative;overflow:hidden}
+.problem-box::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(34,197,94,.04),rgba(20,184,166,.02));z-index:0}
+.problem-box p{position:relative;z-index:1;font-size:.9rem;color:var(--fg2);line-height:1.8}
+.problem-box strong{color:#fff;font-weight:500}
+.problem-box .num{font-family:var(--mono);color:var(--green);font-weight:700}
+
+/* FEATURE CATEGORIES */
+.cat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.6rem}
+.cat-card{padding:1.2rem;text-align:center;cursor:default}
+.cat-card .icon{font-size:1.5rem;margin-bottom:.5rem}
+.cat-card h3{font-family:var(--mono);font-size:.78rem;color:var(--teal);margin-bottom:.3rem;font-weight:700}
+.cat-card .count{font-family:var(--mono);font-size:.6rem;color:var(--fg3);margin-bottom:.5rem}
+.cat-card ul{list-style:none;text-align:left;font-size:.7rem;color:var(--fg2);line-height:1.8}
+
+/* SCORE */
+.score-display{display:flex;align-items:center;justify-content:center;gap:2rem;flex-wrap:wrap;margin-top:1rem}
+.score-ring{width:120px;height:120px;position:relative}
+.score-ring svg{width:100%;height:100%;transform:rotate(-90deg)}
+.score-ring circle{fill:none;stroke-width:6;stroke-linecap:round}
+.score-ring .track{stroke:rgba(255,255,255,.05)}
+.score-ring .fill{stroke:var(--green);stroke-dasharray:339.292;stroke-dashoffset:33.929;transition:stroke-dashoffset 1.5s ease}
+.score-num{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:1.8rem;font-weight:700;color:#fff}
+.score-legend{font-size:.75rem;color:var(--fg2);line-height:2}
+.score-legend .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:.4rem}
+.score-legend .excellent{background:var(--green)}
+.score-legend .good{background:var(--teal)}
+.score-legend .fair{background:var(--amber)}
+.score-legend .poor{background:var(--red)}
+
+/* COMMANDS */
+.cmd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.6rem}
+.cmd{padding:1rem 1.2rem;cursor:default}
+.cmd h3{font-family:var(--mono);font-size:.78rem;color:var(--teal);margin-bottom:.3rem;font-weight:700}
+.cmd p{font-size:.7rem;color:var(--fg2);line-height:1.5}
+
+/* TERMINAL */
+.term{max-width:620px;overflow:hidden}
+.term-bar{display:flex;gap:5px;padding:10px 14px;background:rgba(255,255,255,.02);border-bottom:1px solid rgba(255,255,255,.04)}
+.term-bar i{width:9px;height:9px;border-radius:50%;display:block}
+.term-bar .r{background:var(--red)}.term-bar .y{background:var(--amber)}.term-bar .g{background:var(--green)}
+.term-body{padding:1.2rem;font-family:var(--mono);font-size:.73rem;line-height:2}
+.term-body .p{color:var(--green);user-select:none}
+.term-body .c{color:#fff}
+.term-body .cm{color:var(--fg3)}
+.term-body .out{color:var(--teal)}
+
+/* ZERO DEPS */
+.deps-box{display:flex;align-items:center;gap:1.5rem;padding:1.5rem;flex-wrap:wrap}
+.deps-box .big{font-family:var(--mono);font-size:2rem;font-weight:700;color:var(--green)}
+.deps-box p{font-size:.82rem;color:var(--fg2);line-height:1.6;flex:1;min-width:200px}
+.deps-box p strong{color:#fff;font-weight:500}
+
+footer{text-align:center;padding:3rem 1.5rem;font-size:.7rem;color:var(--fg3)}
+footer a{color:var(--fg2)}
+.tool-series{max-width:var(--max);margin:0 auto;padding:0 1.5rem 1rem;text-align:center;font-family:var(--mono);font-size:.6rem;color:var(--fg3);word-spacing:.3em}
+.tool-series a{color:var(--fg3)}
+.tool-series a:hover{color:var(--teal)}
+.tool-series a.current{color:var(--green);font-weight:700}
+
+[data-a]{opacity:0;transform:translateY(20px);transition:opacity .7s cubic-bezier(.16,1,.3,1),transform .7s cubic-bezier(.16,1,.3,1)}
+[data-a].v{opacity:1;transform:none}
+.hero h1{animation:hi .9s cubic-bezier(.16,1,.3,1) both}
+.hero-sub{animation:hi .9s cubic-bezier(.16,1,.3,1) .1s both}
+.stat-pill{animation:hi .9s cubic-bezier(.16,1,.3,1) .2s both}
+.install-wrap{animation:hi .9s cubic-bezier(.16,1,.3,1) .3s both}
+@keyframes hi{from{opacity:0;transform:translateY(25px) scale(.98)}to{opacity:1;transform:none}}
+
+/* === TABLET (max 768px) === */
+@media(max-width:768px){
+  .section{padding:3.5rem 1rem}
+  .hero{padding:5.5rem 1rem 3rem;min-height:auto}
+  .cmd-grid{grid-template-columns:1fr 1fr}
+  .cat-grid{grid-template-columns:1fr 1fr}
+  h1{font-size:clamp(2.8rem,9vw,7rem)}
+  .s-title{font-size:1.4rem}
+  .score-display{gap:1.5rem}
+  .score-ring{width:100px;height:100px}
+  .score-num{font-size:1.5rem}
+}
+
+/* === MOBILE (max 600px) === */
+@media(max-width:600px){
+  .nav-links a:not(.gh-pill){display:none}
+  nav{width:calc(100% - 1rem);top:8px;padding:.4rem .7rem}
+  .hero{padding:4.5rem .75rem 2rem}
+  h1{font-size:clamp(2.2rem,8vw,3.5rem)}
+  h1 .ar{font-size:.5em}
+  .hero-sub{font-size:.88rem;padding:0 .25rem}
+  .section{padding:2.5rem .75rem}
+  .s-title{font-size:1.25rem}
+  .s-desc{font-size:.8rem}
+
+  .install-wrap{flex-wrap:wrap;padding:.5rem;gap:.4rem;justify-content:center;max-width:100%}
+  .install-wrap .pr{display:none}
+  .install-wrap code{flex:none;font-size:.72rem;word-break:break-all}
+  .install-btn{width:100%}
+
+  .stat-pill{flex-wrap:wrap;justify-content:center;gap:.4rem;padding:.8rem 1rem}
+  .stat-pill .sep{display:none}
+  .stat-pill .stat{font-size:.7rem}
+
+  .problem-box{padding:1.2rem}
+  .problem-box p{font-size:.82rem}
+
+  .cat-grid{grid-template-columns:1fr}
+  .cat-card{padding:.8rem 1rem;text-align:left;display:grid;grid-template-columns:auto 1fr;gap:.5rem;align-items:start}
+  .cat-card .icon{margin-bottom:0;grid-row:1/3}
+  .cat-card ul{grid-column:1/-1}
+
+  .score-display{flex-direction:column;gap:1rem}
+
+  .cmd-grid{grid-template-columns:1fr}
+  .cmd{padding:.8rem 1rem}
+  .cmd h3{font-size:.72rem}
+  .cmd p{font-size:.65rem}
+
+  .deps-box{flex-direction:column;text-align:center;gap:.8rem;padding:1.2rem}
+  .deps-box .big{font-size:1.5rem}
+  .deps-box p{font-size:.78rem}
+
+  .term{max-width:100%;border-radius:10px}
+  .term-body{font-size:.62rem;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:pre;padding:.8rem}
+
+  footer{padding:2rem .75rem}
+  footer p{font-size:.65rem}
+  .tool-series{font-size:.52rem;padding:0 .75rem .8rem}
+}
+
+/* === SMALL MOBILE (max 380px) === */
+@media(max-width:380px){
+  h1{font-size:2rem}
+  h1 .ar{font-size:.55em}
+  .hero{padding:4rem .5rem 1.5rem}
+  .section{padding:2rem .5rem}
+  nav{padding:.35rem .5rem}
+  .gh-pill{font-size:.6rem;padding:.2rem .4rem}
+  .hero-badge{font-size:.58rem;padding:.25rem .6rem}
+  .hero-sub{font-size:.82rem}
+  .tool-series{font-size:.48rem;word-spacing:.15em}
+}
+  /* Small phone (iPhone SE/mini) */
+  @media (max-width: 375px) { body { font-size: 13px; } h1 { font-size: 1.6rem !important; } pre, code { font-size: .7rem !important; } }
+  /* Landscape phone */
+  @media (max-height: 500px) and (orientation: landscape) { header { padding-top: 1rem !important; min-height: auto !important; } }
+  /* Safe area for notched phones */
+  @supports (padding: env(safe-area-inset-top)) { body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); } }
+</style>
+</head>
+<body>
+
+<div class="bg-mesh"><div class="orb orb-1"></div><div class="orb orb-2"></div><div class="orb orb-3"></div></div>
+<div class="bg-grid"></div>
+
+<nav class="glass">
+  <div class="logo">mukhtasar<span class="v">v0.2.0</span></div>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#commands">Commands</a>
+    <a href="#scoring">Scoring</a>
+    <a href="https://github.com/Moshe-ship/mukhtasar" class="gh-pill">
+      <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      GitHub
+    </a>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="hero-badge glass">Arabic Text Summarizer</div>
+  <h1>mukhtasar<span class="ar">مختصر</span></h1>
+  <p class="hero-sub">Summarize Arabic text. <strong>Extractive, offline, dialect-aware.</strong> No API. No model.</p>
+  <div class="stat-pill glass">
+    <span class="stat">7 Features</span>
+    <span class="sep">&middot;</span>
+    <span class="stat">250+ Stopwords</span>
+    <span class="sep">&middot;</span>
+    <span class="stat">4 Dialects</span>
+    <span class="sep">&middot;</span>
+    <span class="stat">6 Commands</span>
+  </div>
+  <div class="install-wrap glass">
+    <span class="pr">$</span>
+    <code>pip install mukhtasar</code>
+    <button class="install-btn" onclick="doCopy(this)">Copy</button>
+  </div>
+</section>
+
+<section class="section" id="problem">
+  <div class="s-label">The Problem</div>
+  <div class="s-title">Arabic summarization shouldn't need a cloud API.</div>
+  <div class="problem-box glass" data-a>
+    <p>Every Arabic NLP pipeline needs summarization. Existing tools require <strong>cloud APIs</strong>, <strong>massive model downloads</strong>, or don't handle Arabic morphology. mukhtasar uses <strong>TextRank + TF-IDF</strong> with <span class="num">7</span> Arabic-aware features to extract the most important sentences. Zero dependencies beyond <strong>Rich</strong>.</p>
+  </div>
+</section>
+
+<section class="section" id="features">
+  <div class="s-label">7-Feature Scoring</div>
+  <div class="s-title">Arabic-aware sentence importance scoring.</div>
+  <div class="s-desc">Each sentence is scored across 7 weighted features designed for Arabic text morphology and structure.</div>
+  <div class="cat-grid">
+    <div class="cat-card glass" data-a>
+      <div class="icon">&#x1F310;</div>
+      <h3>TextRank</h3>
+      <div class="count">35% weight</div>
+      <ul>
+        <li>Graph-based ranking</li>
+        <li>TF-IDF similarity</li>
+        <li>Sentence centrality</li>
+      </ul>
+    </div>
+    <div class="cat-card glass" data-a>
+      <div class="icon">&#x1F4CD;</div>
+      <h3>Position</h3>
+      <div class="count">15% weight</div>
+      <ul>
+        <li>Lead sentences boost</li>
+        <li>Paragraph awareness</li>
+      </ul>
+    </div>
+    <div class="cat-card glass" data-a>
+      <div class="icon">&#x1F50D;</div>
+      <h3>Cue Words</h3>
+      <div class="count">15% weight</div>
+      <ul>
+        <li>Arabic signal phrases</li>
+        <li>Importance markers</li>
+      </ul>
+    </div>
+    <div class="cat-card glass" data-a>
+      <div class="icon">&#x1F4D1;</div>
+      <h3>Title Similarity</h3>
+      <div class="count">15% weight</div>
+      <ul>
+        <li>Title word overlap</li>
+        <li>Topic relevance</li>
+      </ul>
+    </div>
+    <div class="cat-card glass" data-a>
+      <div class="icon">&#x0639;</div>
+      <h3>Proper Nouns</h3>
+      <div class="count">10% weight</div>
+      <ul>
+        <li>Named entity signals</li>
+        <li>Arabic noun patterns</li>
+      </ul>
+    </div>
+    <div class="cat-card glass" data-a>
+      <div class="icon">&#x0023;</div>
+      <h3>Numbers & Length</h3>
+      <div class="count">5% + 5% weight</div>
+      <ul>
+        <li>Numeric data presence</li>
+        <li>Sentence length score</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="scoring">
+  <div class="s-label">Arabic NLP</div>
+  <div class="s-title">Dialect-aware. Morphology-aware.</div>
+  <div class="s-desc">Built from the ground up for Arabic text processing across MSA and dialects.</div>
+  <div class="score-display" data-a>
+    <div class="score-ring">
+      <svg viewBox="0 0 120 120">
+        <circle class="track" cx="60" cy="60" r="54"/>
+        <circle class="fill" cx="60" cy="60" r="54"/>
+      </svg>
+      <div class="score-num">250+</div>
+    </div>
+    <div class="score-legend">
+      <div><span class="dot excellent"></span>MSA — Modern Standard Arabic</div>
+      <div><span class="dot good"></span>Gulf — Saudi, Emirati, Kuwaiti</div>
+      <div><span class="dot fair"></span>Egyptian — Masri dialect</div>
+      <div><span class="dot poor"></span>Levantine — Syrian, Lebanese, Jordanian</div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="commands">
+  <div class="s-label">Commands</div>
+  <div class="s-title">6 commands. Zero config.</div>
+  <div class="cmd-grid">
+    <div class="cmd glass" data-a><h3>text</h3><p>Summarize text from argument or stdin. Quick inline summarization.</p></div>
+    <div class="cmd glass" data-a><h3>file</h3><p>Summarize a file (.txt, .jsonl). Control ratio with --ratio flag.</p></div>
+    <div class="cmd glass" data-a><h3>multi</h3><p>Summarize multiple documents with redundancy removal. >80% overlap dedup.</p></div>
+    <div class="cmd glass" data-a><h3>score</h3><p>Show sentences ranked by importance with full feature breakdown.</p></div>
+    <div class="cmd glass" data-a><h3>eval</h3><p>ROUGE evaluation (ROUGE-1, ROUGE-2, ROUGE-L) against reference summary.</p></div>
+    <div class="cmd glass" data-a><h3>explain</h3><p>How mukhtasar works — scoring weights, stemming, sentence splitting.</p></div>
+  </div>
+</section>
+
+<section class="section" id="deps">
+  <div class="s-label">Dependencies</div>
+  <div class="s-title">Zero beyond Rich.</div>
+  <div class="deps-box glass" data-a>
+    <div class="big">0</div>
+    <p>No cloud API. No model download. No numpy. No transformers. Only <strong>Rich</strong> for pretty terminal output. Light stemming turns <strong>كتابات</strong> into <strong>كتاب</strong> and <strong>المطورون</strong> into <strong>مطور</strong>. Smart sentence splitting handles Arabic commas, semicolons, bullets, and quoted speech.</p>
+  </div>
+</section>
+
+<section class="section" id="start">
+  <div class="s-label">Get Started</div>
+  <div class="s-title">Four lines to summarize Arabic text.</div>
+  <div class="term glass" data-a>
+    <div class="term-bar"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+    <div class="term-body">
+<span class="cm"># Install</span>
+<span class="p">$ </span><span class="c">pip install mukhtasar</span>
+
+<span class="cm"># Summarize inline text</span>
+<span class="p">$ </span><span class="c">mukhtasar text "الذكاء الاصطناعي يغير العالم..." --title "الذكاء الاصطناعي"</span>
+
+<span class="cm"># Summarize a file</span>
+<span class="p">$ </span><span class="c">mukhtasar file article.txt --ratio 0.2</span>
+
+<span class="cm"># ROUGE evaluation</span>
+<span class="p">$ </span><span class="c">mukhtasar eval --reference gold.txt --summary output.txt</span>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <p style="font-size:.8rem;color:var(--fg2);margin-bottom:.6rem" dir="rtl">مقدمة من <a href="https://x.com/i/communities/2032184341682643429" style="color:var(--teal)">مجتمع الذكاء الاصطناعي السعودي</a> للعرب أولا وللعالم أجمع</p>
+  <p style="font-size:.72rem;color:var(--fg3);margin-bottom:.8rem">Brought to you by the <a href="https://x.com/i/communities/2032184341682643429">Saudi AI Community</a> — for Arabs first, and the world at large.</p>
+  <p>MIT License &middot; <a href="https://github.com/Moshe-ship">Musa the Carpenter</a> &middot; <a href="https://github.com/Moshe-ship/mukhtasar">GitHub</a></p>
+</footer>
+
+<div class="tool-series">
+  <a href="https://github.com/Moshe-ship/artok">artok</a> &middot;
+  <a href="https://github.com/Moshe-ship/bidi-guard">bidi-guard</a> &middot;
+  <a href="https://github.com/Moshe-ship/arabench">arabench</a> &middot;
+  <a href="https://github.com/Moshe-ship/majal">majal</a> &middot;
+  <a href="https://github.com/Moshe-ship/khalas">khalas</a> &middot;
+  <a href="https://github.com/Moshe-ship/safha">safha</a> &middot;
+  <a href="https://github.com/Moshe-ship/raqeeb">raqeeb</a> &middot;
+  <a href="https://github.com/Moshe-ship/sarih">sarih</a> &middot;
+  <a href="https://github.com/Moshe-ship/qalam">qalam</a> &middot;
+  <a href="https://github.com/Moshe-ship/naql">naql</a> &middot;
+  <a href="https://github.com/Moshe-ship/samt">samt</a> &middot;
+  <a href="https://github.com/Moshe-ship/jadwal">jadwal</a> &middot;
+  <a href="https://github.com/Moshe-ship/mukhtasar" class="current">mukhtasar</a>
+</div>
+
+<script>
+function doCopy(b){navigator.clipboard.writeText('pip install mukhtasar');b.textContent='Copied!';b.classList.add('copied');setTimeout(()=>{b.textContent='Copy';b.classList.remove('copied')},1500)}
+const io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('v');io.unobserve(e.target)}})},{threshold:.08,rootMargin:'0px 0px -30px 0px'});
+document.querySelectorAll('[data-a]').forEach(el=>io.observe(el));
+</script>
+</body>
+</html>
