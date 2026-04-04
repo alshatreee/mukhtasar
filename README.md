@@ -1,0 +1,91 @@
+# mukhtasar (مختصر) — Arabic Text Summarizer
+
+> Summarize Arabic text. Extractive. Offline. Dialect-aware. No API. No model.
+
+---
+
+## Why
+
+Arabic text summarization tools either require cloud APIs, need massive model downloads, or don't handle Arabic text properly. mukhtasar uses TextRank + TF-IDF with 220+ Arabic stopwords to extract the most important sentences. Zero dependencies beyond Rich.
+
+## Install
+
+```bash
+pip install mukhtasar
+```
+
+## Quick Start
+
+```bash
+# Summarize text directly
+mukhtasar text "الذكاء الاصطناعي يغير العالم بشكل كبير. التقنيات الحديثة تساعد في تطوير حلول مبتكرة. الشركات تستثمر مليارات في هذا المجال. المملكة العربية السعودية تقود التحول الرقمي في المنطقة. رؤية 2030 تضع التقنية في صميم التنمية."
+
+# Summarize a file
+mukhtasar file article.txt
+
+# Summarize JSONL (extracts text/content/body fields)
+mukhtasar file dataset.jsonl --ratio 0.2
+
+# Pipe from stdin
+cat article.txt | mukhtasar text
+
+# Output as JSON
+mukhtasar text "..." --json
+
+# See sentence scores
+mukhtasar score "..."
+
+# Control compression ratio (default 0.3 = 30% of original)
+mukhtasar text "..." --ratio 0.2
+
+# Limit max sentences
+mukhtasar text "..." --max-sentences 3
+```
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `text` | Summarize text from argument or stdin |
+| `file` | Summarize text from .txt or .jsonl file |
+| `score` | Show all sentences ranked by importance score |
+| `explain` | How mukhtasar works under the hood |
+
+## How It Works
+
+1. **Split** — Arabic-aware sentence splitting (handles ، ؛ ؟ and mixed text)
+2. **Tokenize** — Remove 220+ Arabic stopwords, normalize alef/teh/yeh variants
+3. **TF-IDF** — Weight each word by importance across all sentences
+4. **Similarity** — Cosine similarity between every sentence pair
+5. **TextRank** — PageRank-style algorithm ranks sentences by centrality
+6. **Select** — Top-ranked sentences returned in original order
+
+No API. No model download. No internet. Pure algorithm.
+
+## Dialect Support
+
+Stopwords cover MSA (فصحى), Gulf (خليجي), Egyptian (مصري), and Levantine (شامي).
+
+## Part of the Arabic NLP Suite
+
+mukhtasar is tool #14 in the Arabic NLP CLI suite:
+
+| Tool | What it does |
+|------|-------------|
+| arabench | Benchmark Arabic LLM quality |
+| artok | Arabic token tax calculator |
+| bidi-guard | Scan code for BiDi attacks |
+| jadwal | Arabic synthetic data generator |
+| khalas | Arabic prompt optimizer |
+| majal | Arabic dataset inspector |
+| **mukhtasar** | **Arabic text summarizer** |
+| naql | Arabic model format converter |
+| qalam | Arabic code documentation generator |
+| raqeeb | Arabic RTL testing CLI |
+| safha | Arabic web scraper for ML |
+| samt | Arabic audio/TTS quality checker |
+| sarih | Arabic content moderator |
+
+## License
+
+MIT
