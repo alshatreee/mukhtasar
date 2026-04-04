@@ -6,6 +6,7 @@ mukhtasar/__main__.py
 mukhtasar/arabic.py
 mukhtasar/cli.py
 mukhtasar/display.py
+mukhtasar/rouge.py
 mukhtasar/summarizer.py
 mukhtasar.egg-info/PKG-INFO
 mukhtasar.egg-info/SOURCES.txt

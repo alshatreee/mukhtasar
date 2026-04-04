@@ -1,6 +1,6 @@
 [project]
 name = "mukhtasar"
-version = "0.1.0"
+version = "0.2.0"
 description = "Arabic text summarizer CLI -- extractive summarization, offline, dialect-aware"
 requires-python = ">=3.9"
 license = "MIT"

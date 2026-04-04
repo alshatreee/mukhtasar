@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: mukhtasar
-Version: 0.1.0
+Version: 0.2.0
 Summary: Arabic text summarizer CLI -- extractive summarization, offline, dialect-aware
 Author: Musa the Carpenter
 License-Expression: MIT

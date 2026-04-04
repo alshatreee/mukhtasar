@@ -1,20 +1,29 @@
-"""Extractive Arabic text summarizer using TextRank + TF-IDF."""
+"""Extractive Arabic summarizer — TextRank + TF-IDF + multi-feature scoring."""
 
 from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
-from mukhtasar.arabic import is_arabic, normalize, split_sentences, tokenize
+from mukhtasar.arabic import (
+    CUE_WORDS_IMPORTANT,
+    CUE_WORDS_UNIMPORTANT,
+    count_proper_nouns,
+    has_number,
+    light_stem,
+    normalize,
+    split_sentences,
+    tokenize,
+    tokenize_raw,
+)
 
 
 # ── Data structures ───────────────────────────────────────────────
 
 @dataclass
 class Summary:
-    """Result of summarization."""
     original_length: int
     summary_length: int
     ratio: float
@@ -26,16 +35,15 @@ class Summary:
 
 @dataclass
 class ScoredSentence:
-    """A sentence with its importance score."""
     index: int
     text: str
     score: float
+    features: dict[str, float] | None = None
 
 
-# ── TF-IDF computation ───────────────────────────────────────────
+# ── TF-IDF ────────────────────────────────────────────────────────
 
 def _compute_tf(words: list[str]) -> dict[str, float]:
-    """Term frequency for a single document (sentence)."""
     counts: dict[str, int] = {}
     for w in words:
         counts[w] = counts.get(w, 0) + 1
@@ -44,61 +52,35 @@ def _compute_tf(words: list[str]) -> dict[str, float]:
 
 
 def _compute_idf(tokenized_sentences: list[list[str]]) -> dict[str, float]:
-    """Inverse document frequency across all sentences."""
     n = len(tokenized_sentences)
     if n == 0:
         return {}
     doc_freq: dict[str, int] = {}
     for tokens in tokenized_sentences:
-        seen = set(tokens)
-        for w in seen:
+        for w in set(tokens):
             doc_freq[w] = doc_freq.get(w, 0) + 1
     return {w: math.log(n / (1 + df)) for w, df in doc_freq.items()}
 
 
-# ── Similarity matrix ────────────────────────────────────────────
+# ── Similarity + TextRank ─────────────────────────────────────────
 
-def _cosine_similarity(vec_a: dict[str, float], vec_b: dict[str, float]) -> float:
-    """Cosine similarity between two TF-IDF vectors."""
-    common = set(vec_a.keys()) & set(vec_b.keys())
+def _cosine_similarity(a: dict[str, float], b: dict[str, float]) -> float:
+    common = set(a.keys()) & set(b.keys())
     if not common:
         return 0.0
-    dot = sum(vec_a[w] * vec_b[w] for w in common)
-    mag_a = math.sqrt(sum(v * v for v in vec_a.values()))
-    mag_b = math.sqrt(sum(v * v for v in vec_b.values()))
+    dot = sum(a[w] * b[w] for w in common)
+    mag_a = math.sqrt(sum(v * v for v in a.values()))
+    mag_b = math.sqrt(sum(v * v for v in b.values()))
     if mag_a == 0 or mag_b == 0:
         return 0.0
     return dot / (mag_a * mag_b)
 
 
-def _build_tfidf_vectors(
-    tokenized_sentences: list[list[str]],
-    idf: dict[str, float],
-) -> list[dict[str, float]]:
-    """Build TF-IDF vector for each sentence."""
-    vectors = []
-    for tokens in tokenized_sentences:
-        tf = _compute_tf(tokens)
-        tfidf = {w: tf_val * idf.get(w, 0) for w, tf_val in tf.items()}
-        vectors.append(tfidf)
-    return vectors
-
-
-# ── TextRank ──────────────────────────────────────────────────────
-
-def _textrank(
-    similarity_matrix: list[list[float]],
-    damping: float = 0.85,
-    iterations: int = 30,
-    convergence: float = 0.0001,
-) -> list[float]:
-    """TextRank algorithm on a similarity matrix. Returns scores per node."""
-    n = len(similarity_matrix)
+def _textrank(sim_matrix: list[list[float]], damping: float = 0.85, iterations: int = 30) -> list[float]:
+    n = len(sim_matrix)
     if n == 0:
         return []
-
     scores = [1.0 / n] * n
-
     for _ in range(iterations):
         new_scores = [0.0] * n
         for i in range(n):
@@ -106,19 +88,165 @@ def _textrank(
             for j in range(n):
                 if i == j:
                     continue
-                # Weighted edge: similarity(i,j)
-                out_sum = sum(similarity_matrix[j][k] for k in range(n) if k != j)
+                out_sum = sum(sim_matrix[j][k] for k in range(n) if k != j)
                 if out_sum > 0:
-                    rank_sum += similarity_matrix[j][i] / out_sum * scores[j]
+                    rank_sum += sim_matrix[j][i] / out_sum * scores[j]
             new_scores[i] = (1 - damping) / n + damping * rank_sum
-
-        # Check convergence
         delta = sum(abs(new_scores[i] - scores[i]) for i in range(n))
         scores = new_scores
-        if delta < convergence:
+        if delta < 0.0001:
             break
-
     return scores
+
+
+# ── Feature scoring ───────────────────────────────────────────────
+
+def _position_score(index: int, total: int) -> float:
+    """First and last sentences score higher. First 20% and last 10% boosted."""
+    if total <= 1:
+        return 1.0
+    pos = index / total
+    if pos < 0.2:
+        return 1.0 - (pos * 2)  # 1.0 → 0.6
+    if pos > 0.9:
+        return 0.6 + (pos - 0.9) * 4  # 0.6 → 1.0
+    return 0.3
+
+
+def _length_score(sentence: str, avg_length: float) -> float:
+    """Penalize very short and very long sentences. Optimal ~80-200 chars."""
+    length = len(sentence)
+    if length < 20:
+        return 0.1
+    if length < 40:
+        return 0.3
+    if avg_length > 0:
+        ratio = length / avg_length
+        if 0.5 <= ratio <= 2.0:
+            return 1.0
+        if ratio > 2.0:
+            return 0.5
+    return 0.6
+
+
+def _cue_word_score(sentence: str) -> float:
+    """Score based on Arabic cue words that signal importance."""
+    raw_words = set(tokenize_raw(sentence))
+    normalized_sentence = normalize(sentence)
+
+    # Check important cue words
+    important_hits = 0
+    for cue in CUE_WORDS_IMPORTANT:
+        if cue in normalized_sentence or cue in raw_words:
+            important_hits += 1
+
+    # Check unimportant cue words
+    for cue in CUE_WORDS_UNIMPORTANT:
+        if cue in normalized_sentence:
+            important_hits -= 1
+
+    if important_hits >= 3:
+        return 1.0
+    if important_hits >= 2:
+        return 0.8
+    if important_hits >= 1:
+        return 0.6
+    return 0.2
+
+
+def _number_score(sentence: str) -> float:
+    """Sentences with numbers/statistics tend to be important."""
+    return 0.7 if has_number(sentence) else 0.3
+
+
+def _proper_noun_score(sentence: str) -> float:
+    """Sentences with more proper nouns tend to carry more information."""
+    count = count_proper_nouns(sentence)
+    if count >= 3:
+        return 1.0
+    if count >= 2:
+        return 0.7
+    if count >= 1:
+        return 0.5
+    return 0.2
+
+
+def _title_similarity_score(sentence: str, title: str | None) -> float:
+    """Score based on word overlap with the title/header."""
+    if not title:
+        return 0.5  # Neutral if no title
+
+    title_words = set(tokenize(title))
+    sent_words = set(tokenize(sentence))
+
+    if not title_words:
+        return 0.5
+
+    overlap = len(title_words & sent_words)
+    ratio = overlap / len(title_words)
+
+    if ratio >= 0.5:
+        return 1.0
+    if ratio >= 0.25:
+        return 0.7
+    if overlap >= 1:
+        return 0.5
+    return 0.2
+
+
+# ── Combined scoring ──────────────────────────────────────────────
+
+# Feature weights (tuned for Arabic extractive summarization)
+WEIGHTS = {
+    "textrank": 0.35,
+    "position": 0.15,
+    "length": 0.05,
+    "cue_words": 0.15,
+    "numbers": 0.05,
+    "proper_nouns": 0.10,
+    "title_sim": 0.15,
+}
+
+
+def _normalize_scores(scores: list[float]) -> list[float]:
+    """Normalize scores to [0, 1] range."""
+    if not scores:
+        return scores
+    min_s = min(scores)
+    max_s = max(scores)
+    if max_s == min_s:
+        return [0.5] * len(scores)
+    return [(s - min_s) / (max_s - min_s) for s in scores]
+
+
+def _combined_score(
+    sentences: list[str],
+    textrank_scores: list[float],
+    title: str | None = None,
+) -> list[ScoredSentence]:
+    """Combine all features into a final score per sentence."""
+    n = len(sentences)
+    avg_length = sum(len(s) for s in sentences) / n if n else 100
+
+    # Normalize TextRank scores
+    tr_norm = _normalize_scores(textrank_scores)
+
+    scored = []
+    for i in range(n):
+        features = {
+            "textrank": tr_norm[i],
+            "position": _position_score(i, n),
+            "length": _length_score(sentences[i], avg_length),
+            "cue_words": _cue_word_score(sentences[i]),
+            "numbers": _number_score(sentences[i]),
+            "proper_nouns": _proper_noun_score(sentences[i]),
+            "title_sim": _title_similarity_score(sentences[i], title),
+        }
+
+        final = sum(WEIGHTS[k] * features[k] for k in WEIGHTS)
+        scored.append(ScoredSentence(i, sentences[i], final, features))
+
+    return scored
 
 
 # ── Public API ────────────────────────────────────────────────────
@@ -128,19 +256,9 @@ def summarize(
     ratio: float = 0.3,
     max_sentences: int | None = None,
     min_sentences: int = 1,
+    title: str | None = None,
 ) -> Summary:
-    """
-    Summarize Arabic text using extractive TextRank + TF-IDF.
-
-    Args:
-        text: Input text (Arabic or mixed)
-        ratio: Target summary length as fraction of original (0.0-1.0)
-        max_sentences: Hard cap on output sentences
-        min_sentences: Minimum sentences to return
-
-    Returns:
-        Summary with ranked sentences in original order
-    """
+    """Summarize Arabic text using TextRank + TF-IDF + multi-feature scoring."""
     sentences = split_sentences(text)
 
     if len(sentences) <= min_sentences:
@@ -154,14 +272,17 @@ def summarize(
             text=text.strip(),
         )
 
-    # Tokenize each sentence
+    # Tokenize with stemming
     tokenized = [tokenize(s) for s in sentences]
 
-    # Build TF-IDF
+    # TF-IDF
     idf = _compute_idf(tokenized)
-    vectors = _build_tfidf_vectors(tokenized, idf)
+    vectors = []
+    for tokens in tokenized:
+        tf = _compute_tf(tokens)
+        vectors.append({w: tf[w] * idf.get(w, 0) for w in tf})
 
-    # Build similarity matrix
+    # Similarity matrix
     n = len(sentences)
     sim_matrix = [[0.0] * n for _ in range(n)]
     for i in range(n):
@@ -170,22 +291,19 @@ def summarize(
             sim_matrix[i][j] = sim
             sim_matrix[j][i] = sim
 
-    # Run TextRank
-    scores = _textrank(sim_matrix)
+    # TextRank
+    tr_scores = _textrank(sim_matrix)
 
-    # Score sentences
-    scored = [ScoredSentence(i, sentences[i], scores[i]) for i in range(n)]
+    # Combined multi-feature scoring
+    scored = _combined_score(sentences, tr_scores, title=title)
 
-    # Determine how many to keep
-    target = max(min_sentences, int(len(sentences) * ratio))
+    # Select top sentences
+    target = max(min_sentences, int(n * ratio))
     if max_sentences:
         target = min(target, max_sentences)
-    target = min(target, len(sentences))
+    target = min(target, n)
 
-    # Select top-scored sentences
     ranked = sorted(scored, key=lambda s: s.score, reverse=True)[:target]
-
-    # Return in original order
     selected = sorted(ranked, key=lambda s: s.index)
     summary_sentences = [s.text for s in selected]
     summary_text = " ".join(summary_sentences)
@@ -195,7 +313,7 @@ def summarize(
         summary_length=len(summary_text),
         ratio=len(summary_text) / len(text) if text else 0,
         sentence_count=len(summary_sentences),
-        original_sentences=len(sentences),
+        original_sentences=n,
         sentences=summary_sentences,
         text=summary_text,
     )
@@ -205,11 +323,11 @@ def summarize_file(
     path: str | Path,
     ratio: float = 0.3,
     max_sentences: int | None = None,
+    title: str | None = None,
 ) -> Summary:
-    """Summarize text from a file."""
+    """Summarize text from a file (.txt or .jsonl)."""
     text = Path(path).read_text(encoding="utf-8")
 
-    # Handle JSONL: summarize the 'text' field of each line
     if str(path).endswith(".jsonl"):
         lines = []
         for line in text.strip().split("\n"):
@@ -222,18 +340,65 @@ def summarize_file(
                 continue
         text = "\n".join(lines)
 
-    return summarize(text, ratio=ratio, max_sentences=max_sentences)
+    # Try to extract title from first line
+    if not title:
+        first_line = text.strip().split("\n")[0].strip()
+        if len(first_line) < 100 and not first_line.endswith("."):
+            title = first_line
+
+    return summarize(text, ratio=ratio, max_sentences=max_sentences, title=title)
 
 
-def score_sentences(text: str) -> list[ScoredSentence]:
-    """Return all sentences with their TextRank scores, sorted by score."""
+def summarize_multi(
+    paths: list[str | Path],
+    ratio: float = 0.3,
+    max_sentences: int | None = None,
+) -> Summary:
+    """Summarize across multiple documents with redundancy removal."""
+    all_sentences: list[str] = []
+    all_text = ""
+
+    for path in paths:
+        text = Path(path).read_text(encoding="utf-8")
+        all_text += text + "\n"
+        all_sentences.extend(split_sentences(text))
+
+    if not all_sentences:
+        return Summary(0, 0, 0, 0, 0, [], "")
+
+    # Remove near-duplicate sentences (>80% word overlap)
+    unique: list[str] = []
+    unique_tokens: list[set[str]] = []
+    for s in all_sentences:
+        tokens = set(tokenize(s))
+        is_dup = False
+        for existing in unique_tokens:
+            if existing and tokens:
+                overlap = len(tokens & existing) / max(len(tokens), len(existing))
+                if overlap > 0.8:
+                    is_dup = True
+                    break
+        if not is_dup:
+            unique.append(s)
+            unique_tokens.append(tokens)
+
+    # Summarize the deduplicated set
+    combined = "\n".join(unique)
+    return summarize(combined, ratio=ratio, max_sentences=max_sentences)
+
+
+def score_sentences(text: str, title: str | None = None) -> list[ScoredSentence]:
+    """Return all sentences scored and ranked, with feature breakdown."""
     sentences = split_sentences(text)
     if not sentences:
         return []
 
     tokenized = [tokenize(s) for s in sentences]
     idf = _compute_idf(tokenized)
-    vectors = _build_tfidf_vectors(tokenized, idf)
+    vectors = []
+    for tokens in tokenized:
+        tf = _compute_tf(tokens)
+        vectors.append({w: tf[w] * idf.get(w, 0) for w in tf})
 
     n = len(sentences)
     sim_matrix = [[0.0] * n for _ in range(n)]
@@ -243,6 +408,6 @@ def score_sentences(text: str) -> list[ScoredSentence]:
             sim_matrix[i][j] = sim
             sim_matrix[j][i] = sim
 
-    scores = _textrank(sim_matrix)
-    scored = [ScoredSentence(i, sentences[i], scores[i]) for i in range(n)]
+    tr_scores = _textrank(sim_matrix)
+    scored = _combined_score(sentences, tr_scores, title=title)
     return sorted(scored, key=lambda s: s.score, reverse=True)

@@ -1,7 +1,8 @@
 """mukhtasar (مختصر) — Arabic Text Summarizer."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
-__all__ = ["summarize", "summarize_file"]
+__all__ = ["summarize", "summarize_file", "summarize_multi", "score_sentences", "evaluate"]
 
-from mukhtasar.summarizer import summarize, summarize_file
+from mukhtasar.rouge import evaluate
+from mukhtasar.summarizer import score_sentences, summarize, summarize_file, summarize_multi
