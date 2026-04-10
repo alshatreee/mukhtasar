@@ -94,7 +94,13 @@ def is_arabic(text: str) -> bool:
 # ── Root extraction (lightweight Arabic stemmer) ──────────────────
 
 # Common Arabic prefixes and suffixes for light stemming
-_PREFIXES = ["ال", "وال", "بال", "كال", "فال", "لل", "و", "ف", "ب", "ك", "ل", "س"]
+# Long prefixes (safe to remove with 2+ remaining chars)
+_PREFIXES_LONG = ["وال", "بال", "كال", "فال", "لل", "ال"]
+# Short prefixes — only conjunctions (و and ف) are safe as single-char prefixes.
+# ب, ك, ل, س are too ambiguous alone (كتاب, بلاد, لعبة, سيارة) so they are
+# only stripped as part of long prefixes (بال, كال, etc.)
+_PREFIXES_SHORT = ["و", "ف"]
+# Suffixes sorted longest-first
 _SUFFIXES = ["ها", "هم", "هن", "كم", "كن", "نا", "ون", "ين", "ات", "ان", "تا", "تم", "تن", "ية", "ي", "ه", "ك", "ت", "ا", "ة", "ن"]
 
 
@@ -103,19 +109,32 @@ def light_stem(word: str) -> str:
 
     Not a full root extractor, but maps inflected forms closer together:
     كتابات → كتاب, المطورون → مطور, يكتبون → يكتب
+
+    Improved: single-char prefixes (و ف ب ك ل س) require at least
+    3 remaining characters, preventing over-stripping like كتاب → تاب.
     """
     w = normalize(word)
     if len(w) <= 3:
         return w
 
-    # Remove prefixes (longest first)
-    for prefix in sorted(_PREFIXES, key=len, reverse=True):
+    # Try long prefixes first (2+ chars, need 2+ remaining)
+    stripped = False
+    for prefix in _PREFIXES_LONG:
         if w.startswith(prefix) and len(w) - len(prefix) >= 2:
             w = w[len(prefix):]
+            stripped = True
             break
 
-    # Remove suffixes (longest first)
-    for suffix in sorted(_SUFFIXES, key=len, reverse=True):
+    # Try short prefixes only if long prefix didn't match
+    # Require 3+ remaining chars to avoid over-stripping
+    if not stripped:
+        for prefix in _PREFIXES_SHORT:
+            if w.startswith(prefix) and len(w) - len(prefix) >= 3:
+                w = w[len(prefix):]
+                break
+
+    # Remove suffixes (longest first, need 2+ remaining)
+    for suffix in _SUFFIXES:
         if w.endswith(suffix) and len(w) - len(suffix) >= 2:
             w = w[:-len(suffix)]
             break

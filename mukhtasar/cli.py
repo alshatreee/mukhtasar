@@ -18,6 +18,7 @@ from mukhtasar.display import (
 )
 from mukhtasar.rouge import evaluate
 from mukhtasar.summarizer import score_sentences, summarize, summarize_file, summarize_multi
+from mukhtasar.web import summarize_url
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -48,6 +49,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("paths", nargs="+", help="File paths")
     p.add_argument("-r", "--ratio", type=float, default=0.3)
     p.add_argument("-n", "--max-sentences", type=int)
+    p.add_argument("--json", action="store_true")
+
+    # ── url ──
+    p = sub.add_parser("url", help="Fetch and summarize a web page")
+    p.add_argument("url", help="URL to fetch and summarize")
+    p.add_argument("-r", "--ratio", type=float, default=0.3)
+    p.add_argument("-n", "--max-sentences", type=int)
+    p.add_argument("--timeout", type=int, default=15, help="Fetch timeout in seconds")
     p.add_argument("--json", action="store_true")
 
     # ── score ──
@@ -105,6 +114,15 @@ def main() -> NoReturn | None:
     if args.command == "multi":
         result = summarize_multi(args.paths, ratio=args.ratio, max_sentences=args.max_sentences)
         display_json(result) if args.json else display_summary(result)
+        return
+
+    if args.command == "url":
+        try:
+            result = summarize_url(args.url, ratio=args.ratio, max_sentences=args.max_sentences, timeout=args.timeout)
+            display_json(result) if args.json else display_summary(result)
+        except (ConnectionError, ValueError) as e:
+            console.print(f"[red]Error:[/red] {e}")
+            sys.exit(1)
         return
 
     if args.command == "score":
