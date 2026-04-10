@@ -1,2 +1,0 @@
-[console_scripts]
-mukhtasar = mukhtasar.cli:main
